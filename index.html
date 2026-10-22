@@ -177,7 +177,17 @@ const DEMO = !/^https:\/\//.test(CONFIG.SCRIPT_URL);   // sem URL = modo teste (
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad = n => String(n).padStart(2, '0');
-const nowStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+const nowStr = () => {
+  // Horário de Brasília fixo, independente do fuso configurado no aparelho
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+  const g = t => partes.find(p => p.type === t).value;
+  return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}:${g('second')}`;
+};
 const parseT = s => new Date(String(s).replace(' ', 'T'));
 const fmtHora = s => s ? String(s).substring(11, 16) : '';
 const fmtData = s => s ? `${String(s).substring(8,10)}/${String(s).substring(5,7)}` : '';
