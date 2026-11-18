@@ -177,6 +177,35 @@ const DEMO = !/^https:\/\//.test(CONFIG.SCRIPT_URL);   // sem URL = modo teste (
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad = n => String(n).padStart(2, '0');
+/* Relógio corrigido: compara o relógio do celular com a hora do servidor (GitHub Pages).
+   Se o aparelho estiver com hora/fuso errado, o app desconta a diferença sozinho. */
+let RELOGIO_OFFSET = 0;
+try { RELOGIO_OFFSET = Number(localStorage.getItem('relogioOffset')) || 0; } catch (e) {}
+let relogioAvisado = false, relogioUltimo = 0;
+async function acertarRelogio(forcar) {
+  if (!forcar && Date.now() - relogioUltimo < 10 * 60000) return;   // no máximo a cada 10 min
+  try {
+    const t0 = Date.now();
+    // HEAD não passa pelo service worker, então a resposta vem sempre do servidor
+    const r = await fetch('./manifest.json?relogio=' + t0, { method: 'HEAD', cache: 'no-store' });
+    const t1 = Date.now();
+    const srv = Date.parse(r.headers.get('Date'));
+    if (!srv) return;
+    relogioUltimo = t1;
+    let off = Math.round(srv + 500 - (t0 + t1) / 2);          // +500: o cabeçalho só tem segundos
+    if (Math.abs(off) < 2 * 60000) off = 0;                     // diferença pequena: ignora
+    RELOGIO_OFFSET = off;
+    try { localStorage.setItem('relogioOffset', String(off)); } catch (e) {}
+    if (off && !relogioAvisado) {
+      relogioAvisado = true;
+      const min = Math.round(Math.abs(off) / 60000);
+      const txt = min >= 60 ? `${Math.floor(min / 60)}h${pad(min % 60)}` : `${min} min`;
+      toast(`Relógio do celular está ${off < 0 ? 'adiantado' : 'atrasado'} ${txt}. O app já corrige, mas ative "Data e hora automáticas" no aparelho.`, true);
+    }
+  } catch (e) { /* sem internet: usa a última correção salva */ }
+}
+const agora = () => new Date(Date.now() + RELOGIO_OFFSET);
+
 const nowStr = () => {
   // Horário de Brasília fixo, independente do fuso configurado no aparelho
   const partes = new Intl.DateTimeFormat('en-CA', {
@@ -184,7 +213,7 @@ const nowStr = () => {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     hour12: false
-  }).formatToParts(new Date());
+  }).formatToParts(agora());
   const g = t => partes.find(p => p.type === t).value;
   return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}:${g('second')}`;
 };
@@ -193,7 +222,7 @@ const fmtHora = s => s ? String(s).substring(11, 16) : '';
 const fmtData = s => s ? `${String(s).substring(8,10)}/${String(s).substring(5,7)}` : '';
 const fmtDH = s => s ? `${fmtData(s)} ${fmtHora(s)}` : '';
 const fmtFull = s => `${String(s).substring(8,10)}/${String(s).substring(5,7)}/${String(s).substring(0,4)} ${String(s).substring(11,19)}`;
-const minutosDesde = s => Math.max(0, Math.round((Date.now() - parseT(s)) / 60000));
+const minutosDesde = s => Math.max(0, Math.round((parseT(nowStr()) - parseT(s)) / 60000));
 const dur = s => { const m = minutosDesde(s); return m < 60 ? `${m} min` : `${Math.floor(m/60)}h${pad(m%60)}`; };
 const uid = p => `${p}-${nowStr().replace(/[^0-9]/g,'')}-${Math.random().toString(36).slice(2,6)}`;
 const TIPOS = { funcionario:'Funcionário', terceiro:'Terceiro', visitante:'Visitante' };
@@ -281,6 +310,7 @@ let syncing = false;
 async function sync(manual) {
   if (DEMO) { if (manual) toast('Modo teste: nada é enviado. Configure a URL no index.html.'); return; }
   if (syncing) return;
+  acertarRelogio();
   if (!navigator.onLine) { if (manual) toast('Sem sinal. Os registros ficam guardados no celular.', true); paintSync(); return; }
   syncing = true; let enviados = 0;
   try {
@@ -753,7 +783,7 @@ document.addEventListener('input', e => {
 /* ===================================================================
    Início
    =================================================================== */
-addEventListener('online', () => { paintSync(); sync(); });
+addEventListener('online', () => { paintSync(); acertarRelogio(true); sync(); });
 addEventListener('offline', paintSync);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { sync(); if (S.screen === 'home') paintList(); } });
 setInterval(() => { if (!document.hidden) { sync(); if (S.screen === 'home') paintList(); } }, 30000);
@@ -762,6 +792,7 @@ setInterval(() => { if (!document.hidden) { sync(); if (S.screen === 'home') pai
   history.replaceState({ screen: 'home' }, '');
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  acertarRelogio(true);
   await loadLocal(); render();
   if (S.vig) { sync(); refreshOpen(); }
 })();
